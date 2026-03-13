@@ -1,0 +1,27 @@
+## Creative Commons Attribution 4.0 International License
+
+The **Creative Commons Attribution 4.0 International (CC BY 4.0)** license is a globally recognized open content license that allows sharing, adaptation, and reuse of creative works, including text, images, and data, for any purpose—even commercially—provided that appropriate credit is given to the creator. It is one of the most permissive licenses in the Creative Commons suite and is frequently used in academia, education, and open data publishing.
+
+### Key facts
+
+* **Version released:** November 25, 2013
+* **License steward:** Creative Commons
+* **Permissions:** Copy, distribute, remix, and build upon material for any purpose
+* **Conditions:** Attribution required; no additional restrictions allowed
+* **SPDX identifier:** CC-BY-4.0
+
+### Terms and Permissions
+
+The license grants anyone the irrevocable right to share (copy and redistribute) and adapt (remix and transform) the material in any medium or format. These freedoms apply worldwide and last for the duration of applicable copyright. The only core condition is attribution: users must give appropriate credit, link to the license, and indicate if changes were made. No endorsement by the original creator may be implied, and no legal or technical restrictions can limit others from using the work under the same terms. ([Creative Commons][1])
+
+### Scope and Usage
+
+CC BY 4.0 is designed for universal applicability—it incorporates international legal terminology and explicitly covers *sui generis* database rights, ensuring global enforceability. It is extensively adopted by scientific publishers, open-access journals, cultural heritage institutions, and government agencies seeking to promote transparency and reuse. While popular for content and data, it is generally not recommended for software, which is better served by open-source software licenses. ([Creative Commons][2])
+
+### Legal and Practical Considerations
+
+The license includes standard disclaimers: it is provided “as-is,” with no warranties or liability. It does not supersede other applicable rights such as privacy, publicity, or moral rights, which may still constrain certain uses. Users are encouraged to respect reasonable requests from licensors regarding attribution and marking of modifications. ([LICENSE.MD][3])
+
+[1]: https://creativecommons.org/licenses/by/4.0/of/?utm_source=chatgpt.com "Deed - Attribution 4.0 International - Creative Commons"
+[2]: https://wiki.creativecommons.org/index.php/4.0?utm_source=chatgpt.com "4.0 - Creative Commons"
+[3]: https://license.md/licenses/cc-by-4-0-int/?utm_source=chatgpt.com "Creative Comms Attribution 4.0 International - LICENSE.MD"
