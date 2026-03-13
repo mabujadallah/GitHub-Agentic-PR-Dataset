@@ -134,6 +134,7 @@ def github_get(url, params=None, token_idx=None):
             continue  # same token — secondary limits are per-IP not per-token
 
         if r.status_code == 404:
+            print(f"  Not Found (404): {url}", flush=True)
             return None
 
         # Retry on server errors (500, 502, 503) with exponential backoff
@@ -159,7 +160,9 @@ def github_get_all_pages(url, params=None, token_idx=None):
     all_items = []
     while True:
         data = github_get(url, params, token_idx=token_idx)
-        if data is None or len(data) == 0:
+        if data is None:
+            return None # Propagate error
+        if len(data) == 0:
             break
         all_items.extend(data)
         if len(data) < 100:
@@ -329,8 +332,8 @@ DETAILS_CKPT_FILE = f"{CHECKPOINT_DIR}/checkpoint_details_local.json"
 CLONE_WORKERS    = 10         # parallel repo clone/extract/delete threads
 INCLUDE_PATCH    = True       # set False to skip patch extraction (much faster)
 MAX_PATCH_BYTES  = 1_000_000  # 1 MB — patches larger than this are stored as None
-CLONE_TIMEOUT    = 600        # seconds for git clone
-FETCH_TIMEOUT    = 120        # seconds for git fetch
+CLONE_TIMEOUT    = 3600       # seconds for git clone (increased for large repos)
+FETCH_TIMEOUT    = 600        # seconds for git fetch
 SHA_BATCH_SIZE   = 500        # SHAs per batch for git log/diff-tree
 DELETE_AFTER_EXTRACT = True   # delete mirror clone after extracting details (saves disk)
 # ────────────────────────────────────────────────────────────────
@@ -572,8 +575,14 @@ print(pr_df['state'].value_counts())
 COMMITS_CKPT = f"{CHECKPOINT_DIR}/checkpoint_commits.json"
 
 def fetch_pr_commits(pr_id, repo_name, pr_number, token_idx):
-    url = f"https://api.github.com/repos/{repo_name}/pulls/{pr_number}/commits"
     commits = github_get_all_pages(url, token_idx=token_idx)
+    if commits is None:
+        print(f"  [ERROR] Failed to fetch commits for {repo_name}#{pr_number}", flush=True)
+        return pr_id, [], True
+    
+    # If commits is [] (not None), it means the PR truly has no commits (rare) 
+    # or the first page was empty. We still return True for had_error to be safe
+    # if it's unexpected, but at least we didn't print a fetch error.
     if not commits:
         return pr_id, [], True
 
@@ -766,11 +775,17 @@ def clone_or_update_repo(repo_name):
 
     try:
         if repo_path.exists() and (repo_path / 'HEAD').exists():
-            # Already cloned — fetch updates
+            # Already cloned — fetch updates AND pull request refs
             result = subprocess.run(
                 ['git', '-C', str(repo_path), 'remote', 'update', '--prune'],
                 capture_output=True, text=True, timeout=FETCH_TIMEOUT,
             )
+            if result.returncode == 0:
+                # Explicitly fetch all PR refs to ensure missing SHAs are retrieved
+                subprocess.run(
+                    ['git', '-C', str(repo_path), 'fetch', 'origin', '+refs/pull/*/head:refs/pull/*/head'],
+                    capture_output=True, text=True, timeout=FETCH_TIMEOUT,
+                )
             if result.returncode != 0:
                 return repo_path, False, f"fetch failed: {result.stderr.strip()}"
             return repo_path, True, ""
@@ -778,9 +793,15 @@ def clone_or_update_repo(repo_name):
             # Fresh mirror clone
             repo_path.parent.mkdir(parents=True, exist_ok=True)
             result = subprocess.run(
-                ['git', 'clone', '--mirror', url, str(repo_path)],
+                ['git', 'clone', '--mirror', '--filter=blob:none', url, str(repo_path)],
                 capture_output=True, text=True, timeout=CLONE_TIMEOUT,
             )
+            if result.returncode == 0:
+                # Also fetch PR refs immediately after cloning
+                subprocess.run(
+                    ['git', '-C', str(repo_path), 'fetch', 'origin', '+refs/pull/*/head:refs/pull/*/head'],
+                    capture_output=True, text=True, timeout=FETCH_TIMEOUT,
+                )
             if result.returncode != 0:
                 return repo_path, False, f"clone failed: {result.stderr.strip()}"
             return repo_path, True, ""
@@ -990,10 +1011,50 @@ def extract_patches_for_sha(repo_path, sha):
     return patches
 
 
-def process_repo_details(repo_name, shas, sha_to_pr_ids, repo_path):
+def fetch_commit_from_api(repo_name, sha, token_idx):
+    """Fallback: fetch a single commit's details via GitHub API when local git fails."""
+    url = f"https://api.github.com/repos/{repo_name}/commits/{sha}"
+    data = github_get(url, token_idx=token_idx)
+    if not data:
+        return None
+
+    # Format into a structure similar to what extract_commit_metadata returns
+    commit_data = data.get('commit', {})
+    stats = data.get('stats', {})
+    
+    files = []
+    for f in data.get('files', []):
+        add = f.get('additions', 0)
+        dlt = f.get('deletions', 0)
+        fname = f.get('filename')
+        status = f.get('status', 'modified')
+        patch = f.get('patch') if INCLUDE_PATCH else None
+        files.append({
+            'filename': fname,
+            'status': status,
+            'additions': add,
+            'deletions': dlt,
+            'changes': add + dlt,
+            'patch': patch
+        })
+
+    return {
+        'sha': sha,
+        'author': commit_data.get('author', {}).get('name', ''),
+        'committer': commit_data.get('committer', {}).get('name', ''),
+        'message': commit_data.get('message', ''),
+        'commit_stats_total': stats.get('total', 0),
+        'commit_stats_additions': stats.get('additions', 0),
+        'commit_stats_deletions': stats.get('deletions', 0),
+        'files_detailed': files # special field for API results
+    }
+
+
+def process_repo_details(repo_name, shas, sha_to_pr_ids, repo_path, token_idx=0):
     """
     Extract commit details for SHAs in a single repo in batches.
-
+    
+    Uses local git by default; falls back to GitHub API if SHAs are missing locally.
     Yields (detail_rows: list[dict], missing_shas: list[str]) for each batch.
     detail_rows has one row per (sha, pr_id, filename) combination.
     """
@@ -1012,7 +1073,39 @@ def process_repo_details(repo_name, shas, sha_to_pr_ids, repo_path):
 
         for sha in batch:
             if sha not in meta:
-                missing_shas.append(sha)
+                # API Fallback for missing SHAs
+                api_info = fetch_commit_from_api(repo_name, sha, token_idx)
+                if not api_info:
+                    missing_shas.append(sha)
+                    continue
+                
+                # API Success — map to rows
+                base = {
+                    'sha': sha,
+                    'author': api_info['author'],
+                    'committer': api_info['committer'],
+                    'message': api_info['message'],
+                    'commit_stats_total': api_info['commit_stats_total'],
+                    'commit_stats_additions': api_info['commit_stats_additions'],
+                    'commit_stats_deletions': api_info['commit_stats_deletions'],
+                }
+                pr_ids = sha_to_pr_ids.get(sha, [None])
+                if not api_info['files_detailed']:
+                    for pid in pr_ids:
+                        detail_rows.append({
+                            **base, 'pr_id': pid,
+                            'filename': None, 'status': None, 'additions': None,
+                            'deletions': None, 'changes': None, 'patch': None
+                        })
+                else:
+                    for f in api_info['files_detailed']:
+                        for pid in pr_ids:
+                            detail_rows.append({
+                                **base, 'pr_id': pid,
+                                'filename': f['filename'], 'status': f['status'],
+                                'additions': f['additions'], 'deletions': f['deletions'],
+                                'changes': f['changes'], 'patch': f['patch']
+                            })
                 continue
 
             info = meta[sha]
@@ -1246,8 +1339,9 @@ else:
 
     with ThreadPoolExecutor(max_workers=CLONE_WORKERS) as executor:
         futures = {}
-        for rn in remaining_repos:
-            futures[executor.submit(_process_one_repo, rn)] = rn
+        for i, rn in enumerate(remaining_repos):
+            t_idx = i % len(GITHUB_TOKENS)
+            futures[executor.submit(_process_one_repo, rn, t_idx)] = rn
 
         for fut in as_completed(futures):
             repos_processed += 1
@@ -1301,8 +1395,9 @@ else:
         
         with ThreadPoolExecutor(max_workers=CLONE_WORKERS) as executor:
             retry_futures = {}
-            for rn in repos_to_retry:
-                retry_futures[executor.submit(_process_one_repo, rn)] = rn
+            for i, rn in enumerate(repos_to_retry):
+                t_idx = i % len(GITHUB_TOKENS)
+                retry_futures[executor.submit(_process_one_repo, rn, t_idx)] = rn
 
             for fut in as_completed(retry_futures):
                 rn, num_rows, missing_or_shas, err_msg, clone_ok = fut.result()
