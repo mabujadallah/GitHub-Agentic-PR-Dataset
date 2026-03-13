@@ -1,5 +1,5 @@
 # Agentic-PR-A-Large-Scale-Dataset-of-AI-Generated-and-Human-Pull-Requests-on-GitHub
-
+A large-scale dataset of AI-generated and human pull requests collected from GitHub, including PR metadata, commits, diffs, and repository information.
 Efficient, multi-threaded toolkit for collecting large-scale pull request and commit data from GitHub repositories, with a specific focus on analyzing AI-generated PRs (e.g., from Devin, Copilot, Cursor, Claude Code) versus human contributions.
 
 ## Features
