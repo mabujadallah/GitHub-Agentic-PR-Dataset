@@ -1,0 +1,45 @@
+# Python cache and compiled files
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Environments
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# Distribution / packaging
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Data and Checkpoints
+repo_cache/
+data_dec2024_feb2026/
+checkpoint_*.json
+checkpoint_*.json.tmp
+detail_chunks/
+*.parquet
+
+# IDE and OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
