@@ -334,6 +334,7 @@ INCLUDE_PATCH    = True       # set False to skip patch extraction (much faster)
 MAX_PATCH_BYTES  = 1_000_000  # 1 MB — patches larger than this are stored as None
 CLONE_TIMEOUT    = 3600       # seconds for git clone (increased for large repos)
 FETCH_TIMEOUT    = 600        # seconds for git fetch
+EXTRACT_TIMEOUT  = 3600       # seconds for git log/diff-tree extraction per batch
 SHA_BATCH_SIZE   = 500        # SHAs per batch for git log/diff-tree
 DELETE_AFTER_EXTRACT = True   # delete mirror clone after extracting details (saves disk)
 # ────────────────────────────────────────────────────────────────
@@ -863,7 +864,7 @@ def extract_commit_metadata_and_numstat(repo_path, shas):
             ['git', '-C', str(repo_path), 'log',
              '--no-walk', '--stdin', '--no-renames',
              f'--format={fmt}', '--numstat'],
-            input=stdin_data, capture_output=True, timeout=300,
+            input=stdin_data, capture_output=True, timeout=EXTRACT_TIMEOUT,
         )
     except subprocess.TimeoutExpired:
         print(f"    TIMEOUT: git log --numstat on {repo_path}", flush=True)
@@ -929,7 +930,7 @@ def extract_file_statuses(repo_path, shas):
             ['git', '-C', str(repo_path), 'diff-tree',
              '-r', '--no-renames', '--name-status', '--stdin',
              '--root'],  # --root shows the diff for root commits too
-            input=stdin_data, capture_output=True, timeout=300,
+            input=stdin_data, capture_output=True, timeout=EXTRACT_TIMEOUT,
         )
     except subprocess.TimeoutExpired:
         print(f"    TIMEOUT: git diff-tree on {repo_path}", flush=True)
@@ -977,7 +978,7 @@ def extract_patches_for_sha(repo_path, sha):
         result = subprocess.run(
             ['git', '-C', str(repo_path), 'log', '-1',
              '--no-renames', '--format=', '-p', sha],
-            capture_output=True, timeout=120,
+            capture_output=True, timeout=EXTRACT_TIMEOUT,
         )
     except subprocess.TimeoutExpired:
         return {}
@@ -1305,7 +1306,7 @@ else:
     clone_fail_count = 0
     _details_lock = threading.Lock()
 
-    def _process_one_repo(repo_name):
+    def _process_one_repo(repo_name, token_idx):
         """Clone → extract → write chunk → delete for a single repo (thread worker)."""
         shas = repo_shas[repo_name]
         repo_path = sanitize_repo_path(repo_name)
