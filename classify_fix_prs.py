@@ -16,10 +16,18 @@ OUTPUT_DIR = Path("results")
 OUTPUT_DIR.mkdir(exist_ok=True)
 
 FIX_PATTERN = re.compile(
-    r"(^fix(\([^)]*\))?!?[\s:!/])"   # conventional: fix:, fix(scope):, fix!:
-    r"|(\bfix(es|ed|ing)?\b)"          # natural language: fix, fixes, fixed, fixing
-    r"|(\bbug\s*fix\b)"                # "bugfix" or "bug fix"
-    r"|(\bhotfix\b)",                  # hotfix
+    r"(^fix(\([^)]*\))?!?[\s:!/])"       # conventional: fix:, fix(scope):, fix!:
+    r"|(\bfix(es|ed|ing)?\b)"             # natural language: fix, fixes, fixed, fixing
+    r"|(\bbug\s*fix\b)"                   # "bugfix" or "bug fix"
+    r"|(\bhotfix\b)"                      # hotfix
+    r"|(\bbug\b)"                         # bug
+    r"|(\bpatch\b)"                       # patch
+    r"|(\bresolv(e[ds]?|ing)\b)"          # resolve, resolved, resolves, resolving
+    r"|(\berror\b)"                       # error
+    r"|(\bcrash(es|ed|ing)?\b)"           # crash, crashes, crashed, crashing
+    r"|(\bdefect\b)"                      # defect
+    r"|(\bregression\b)"                  # regression
+    r"|(\bbroken\b)",                     # broken
     flags=re.IGNORECASE,
 )
 
@@ -71,6 +79,34 @@ def main() -> None:
     fix_path = OUTPUT_DIR / "fix_prs_only.parquet"
     fix_only.to_parquet(fix_path, index=False)
     print(f"\nSaved {len(fix_only):,} fix PRs to {fix_path}")
+
+    # Filter commits and commit details to fix PRs only
+    fix_ids = set(fix_only["id"])
+
+    commits_path = DATA_DIR / "pr_commits.parquet"
+    if commits_path.exists():
+        print("\nFiltering commits to fix PRs ...")
+        commits_df = pd.read_parquet(commits_path)
+        fix_commits = commits_df[commits_df["pr_id"].isin(fix_ids)]
+        fix_commits_path = OUTPUT_DIR / "fix_pr_commits.parquet"
+        fix_commits.to_parquet(fix_commits_path, index=False)
+        print(f"  {len(fix_commits):,} / {len(commits_df):,} commits -> {fix_commits_path}")
+
+        details_path = DATA_DIR / "pr_commit_details.parquet"
+        if details_path.exists():
+            print("Filtering commit details to fix PRs (lean read) ...")
+            # Read only needed columns to avoid loading 39 GB patch column
+            details_df = pd.read_parquet(details_path, columns=[
+                "sha", "pr_id", "filename", "status",
+                "additions", "deletions", "changes",
+                "commit_stats_total", "commit_stats_additions", "commit_stats_deletions",
+            ])
+            fix_details = details_df[details_df["pr_id"].isin(fix_ids)]
+            fix_details_path = OUTPUT_DIR / "fix_pr_commit_details.parquet"
+            fix_details.to_parquet(fix_details_path, index=False)
+            print(f"  {len(fix_details):,} / {len(details_df):,} detail rows -> {fix_details_path}")
+    else:
+        print(f"\n{commits_path} not found — skipping commit/detail filtering.")
 
 
 if __name__ == "__main__":
